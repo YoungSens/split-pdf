@@ -1,86 +1,27 @@
-# PDF 拆分工具
+# PDF.js API 中文文档
 
-这是一个基于 Node.js 的 PDF 拆分工具，可以按照目录章节将 PDF 文件拆分为多个单独的 PDF 文件。
+这是 PDF.js 库的 API 类型定义文件的中文翻译版本。由于文档较长，已被分成多个部分：
 
-## 主要功能
+## 目录
 
-1. **智能目录提取**：
-   - 从 PDF 书签提取目录结构
-   - 当没有书签时，自动扫描前几页寻找目录页，并提取章节信息
-   - 支持多种中英文目录格式
+1. [基本类型和文档参数](pdfjs-api-zh.md) - 包含基本类型定义、文档初始化参数、页面视口参数等
+2. [注释和渲染参数](pdfjs-api-zh-p2.md) - 包含文本标记内容、文本样式、注释参数、渲染参数等
+3. [核心类和方法](pdfjs-api-zh-p3.md) - 包含主要的类定义如 PDFDocumentProxy、PDFPageProxy 等
 
-2. **灵活拆分方式**：
-   - 按章节拆分：将每个章节拆分为单独的 PDF 文件
-   - 回退模式：当无法提取目录时，按指定页数拆分
+## 项目说明
 
-3. **批量处理**：支持批量处理目录中的所有 PDF 文件
-
-## 安装
-
-确保你已安装 Node.js (v14+)，然后运行：
-
-```bash
-npm install
-```
+这是 PDF.js 官方 TypeScript 类型定义文件的中文翻译，旨在帮助中文开发者更好地理解和使用 PDF.js 库。原始类型定义文件位于 `node_modules/pdfjs-dist/types/src/display/api.d.ts`。
 
 ## 使用方法
 
-### 基本用法
+这些文档仅作为参考，帮助您理解 PDF.js 的 API。要在项目中使用 PDF.js，您需要安装 `pdfjs-dist` 包：
 
 ```bash
-npm start
+npm install pdfjs-dist
 ```
 
-这将使用默认配置处理 `./input` 目录中的所有 PDF 文件，并将结果保存到 `./output` 目录。
+然后按照 [PDF.js 官方文档](https://mozilla.github.io/pdf.js/) 进行配置和使用。
 
-### 命令行选项
+## 贡献
 
-```bash
-npm start -- [选项]
-```
-
-可用选项：
-
-- `-i, --input-dir <目录>`：输入 PDF 文件目录，默认为 `./input`
-- `-o, --output-dir <目录>`：输出 PDF 文件目录，默认为 `./output`
-- `-f, --fallback-mode`：当没有找到目录结构时，启用按页数拆分
-- `-p, --pages-per-file <数字>`：回退模式下每个文件的页数，默认为 20
-- `-t, --max-toc-scan <数字>`：查找目录页时扫描的最大页数，默认为 10
-- `-h, --help`：显示帮助信息
-
-### 示例
-
-处理特定目录中的 PDF 文件：
-
-```bash
-npm start -- --input-dir="./my-pdfs" --output-dir="./my-output"
-```
-
-启用回退模式（当无法提取目录时按 30 页拆分）：
-
-```bash
-npm start -- --fallback-mode --pages-per-file=30
-```
-
-扫描前 20 页查找目录页：
-
-```bash
-npm start -- --max-toc-scan=20
-```
-
-## 工作原理
-
-1. **目录提取**：
-   - 首先尝试从 PDF 书签提取目录
-   - 如果没有书签，扫描 PDF 前几页寻找目录页
-   - 在目录页中识别章节标题和页码
-   - 如果都失败，可选择回退到按页数拆分
-
-2. **PDF 拆分**：
-   - 根据提取的目录信息，确定每个章节的页码范围
-   - 创建新的 PDF 文件，包含相应范围的页面
-   - 使用章节名称作为文件名的一部分
-
-## 许可证
-
-MIT 
+欢迎对翻译进行改进和修正。如有问题或建议，请提交 issue 或 pull request。 

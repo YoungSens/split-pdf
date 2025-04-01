@@ -75,33 +75,33 @@ export async function splitByOutlineItems(
   baseFilename: string
 ): Promise<void> {
   console.log(`按照${outline.length}个目录项拆分PDF`);
-  
+
   // 拆分每个章节
   for (let i = 0; i < outline.length; i++) {
     const chapter = outline[i];
     // 页码从0开始计算
-    const startPage = chapter.pageNumber - 1;
+    const startPage = chapter.page;
     const endPage = i < outline.length - 1 
-      ? outline[i + 1].pageNumber - 1
+      ? outline[i + 1].page
       : totalPages;
     
     // 如果当前章节和下一章节页码相同，跳过
     if (startPage >= endPage) {
-      console.log(`跳过章节: ${chapter.title}，页码范围无效：${startPage + 1}-${endPage}`);
+      console.log(`跳过章节: ${chapter.title}，页码范围无效：${startPage}-${endPage}`);
       continue;
     }
-    
-    console.log(`正在处理章节: ${chapter.title}，页码范围：${startPage + 1}-${endPage}`);
     
     try {
       // 创建新的PDF文档
       const newPdfDoc = await PDFDocument.create();
       
       // 复制页面
+      const pageIndices = [];
       for (let pageIndex = startPage; pageIndex < endPage; pageIndex++) {
-        const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageIndex]);
-        newPdfDoc.addPage(copiedPage);
+        pageIndices.push(pageIndex);
       }
+      const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, pageIndices);
+      newPdfDoc.addPage(copiedPage);
       
       // 准备文件名
       // 使用章节标题作为文件名（删除非法字符）
@@ -111,9 +111,14 @@ export async function splitByOutlineItems(
       
       // 保存新的PDF
       const newPdfBytes = await newPdfDoc.save();
+      // const outputPath = path.join(
+      //   outputDir, 
+      //   `${baseFilename}-${chapterTitle}.pdf`
+      // );
+
       const outputPath = path.join(
         outputDir, 
-        `${baseFilename}-${i + 1}-${chapterTitle}.pdf`
+        `${chapterTitle}.pdf`
       );
       
       await fs.writeFile(outputPath, newPdfBytes);

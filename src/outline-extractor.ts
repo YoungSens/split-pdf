@@ -1,15 +1,26 @@
-import * as fs from 'fs-extra';
 import pdfjsLib from './pdfjs-config';
 import { OutlineItem, OutlineResult, OutlineSource, PdfProcessOptions } from './types';
+import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
+import type { RefProxy, TextItem } from 'pdfjs-dist/types/src/display/api';
+
+async function matchPageIndex(doc: PDFDocumentProxy, dest: any): Promise<number> {
+  let ref: RefProxy | null = null;
+  let _dest = Array.isArray(dest) ? dest : await doc.getDestination(dest);
+  if (_dest && _dest.length > 0) {
+    ref = _dest[0] as RefProxy;
+    return await doc.getPageIndex(ref);
+  }
+  return -1;
+}
 
 /**
  * 从PDF书签提取目录结构
- * @param pdfDocument PDF文档对象
+ * @param doc PDF文档对象
  * @returns 目录项数组
  */
-export async function extractOutlineFromBookmarks(pdfDocument: any): Promise<OutlineItem[]> {
+export async function extractOutlineFromBookmarks(doc: PDFDocumentProxy): Promise<OutlineItem[]> {
   try {
-    const outline = await pdfDocument.getOutline();
+    const outline = await doc.getOutline();
     
     if (!outline || outline.length === 0) {
       console.log('未找到书签结构');
@@ -21,37 +32,20 @@ export async function extractOutlineFromBookmarks(pdfDocument: any): Promise<Out
     
     for (let i = 0; i < outline.length; i++) {
       const item = outline[i];
-      if (item.dest !== null && item.dest !== undefined) {
-        let destRef;
-        
+      if (item.dest) {
         try {
-          if (Array.isArray(item.dest)) {
-            destRef = item.dest[0];
-          } else {
-            const dest = await pdfDocument.getDestination(item.dest);
-            if (dest && dest.length > 0) {
-              destRef = dest[0];
-            } else {
-              console.warn(`跳过目录项 "${item.title}"，无效的目标引用`);
-              continue;
-            }
+          const pageNumber = await matchPageIndex(doc, item.dest);
+          if (pageNumber === -1) {
+            console.warn(`跳过目录项 "${item.title}"，无效的目标引用`);
+            continue;
           }
-          
-          const pageNumber = await pdfDocument.getPageIndex(destRef) + 1;
-          
-          processedOutline.push({
-            title: item.title,
-            pageNumber: pageNumber,
-            level: 1 // 假设顶级章节
-          });
+          // level 假设顶级章节 
+          processedOutline.push({ title: item.title.trim(), page: pageNumber, level: 1 });
         } catch (err) {
           console.warn(`无法解析目录项 "${item.title}" 的页码信息: ${(err as Error).message}`);
         }
       }
     }
-    
-    // 按页码排序
-    processedOutline.sort((a, b) => a.pageNumber - b.pageNumber);
     
     return processedOutline;
   } catch (error) {
@@ -60,127 +54,125 @@ export async function extractOutlineFromBookmarks(pdfDocument: any): Promise<Out
   }
 }
 
-/**
- * 查找目录页
- * 通过扫描PDF的前几页内容，寻找含有"目录"、"Contents"等关键词的页面
- * @param pdfDocument PDF文档对象
- * @param maxScanPages 最大扫描页数
- * @returns 目录页索引，如未找到则返回-1
- */
-export async function findTableOfContentsPage(pdfDocument: any, maxScanPages: number): Promise<number> {
+async function matchPageByText(doc: PDFDocumentProxy, maxScanPages: number): Promise<PDFPageProxy | null> {
   // 目录页特征关键词
-  const tocKeywords = ['目录', '目 录', 'contents', 'table of contents', 'catalog'];
+  const tocKeywords = ['目录'];
   // 目录项特征：通常包含多个"......"或点线加页码
-  const tocItemPatterns = [
+  const tocItemPatterns: RegExp[] = [
     /\.{3,}\s*\d+/,  // ....... 123
-    /\d+\s*\.{3,}/,  // 123 .......
-    /第.+章.+\d+/,   // 第X章XXXX 123
-    /\d+\.\s*.+\d+$/  // 1. 章节名 123
   ];
   
-  const numPages = pdfDocument.numPages;
+  const numPages = doc.numPages;
   // 只扫描前几页
   const pagesToScan = Math.min(maxScanPages, numPages);
   
   console.log(`开始扫描前${pagesToScan}页查找目录页...`);
+
+  let target: PDFPageProxy | null = null;
   
   for (let i = 1; i <= pagesToScan; i++) {
-    const page = await pdfDocument.getPage(i);
+    const page = await doc.getPage(i);
     const textContent = await page.getTextContent();
-    const text = textContent.items.map((item: any) => item.str).join(' ').toLowerCase();
-    
+    const text = textContent.items.map((item: any)=> item.str).join('').toLowerCase().replace(/ /g,'');
+
     // 检查是否包含目录关键词
     const hasKeyword = tocKeywords.some(keyword => text.includes(keyword.toLowerCase()));
-    
     // 检查是否包含目录项特征
     const hasPattern = tocItemPatterns.some(pattern => pattern.test(text));
-    
-    // 检查是否有多个页码引用（通常目录页会引用多个页码）
-    const pageNumbers = text.match(/\b\d{1,3}\b/g) || [];
-    const hasMultiplePageRefs = pageNumbers.length >= 3; // 至少有3个数字可能是页码
-    
-    if ((hasKeyword && hasPattern) || (hasPattern && hasMultiplePageRefs)) {
-      console.log(`在第${i}页找到疑似目录页`);
+
+    const annotations = await page.getAnnotations();
+
+    if (hasKeyword && hasPattern && annotations.length > 0) {
+      target = page;
+      break;
+    }
+  }
+
+  return target;
+}
+
+type Line = {
+  y: number;
+  text: string;
+}
+
+type Rect = [left: number, top: number, right: number, bottom: number]
+
+function matchLine(lines: Line[], rect: Rect, startIdx: number = 0): number {
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.y >= rect[1] && line.y <= rect[3]) {
       return i;
     }
   }
-  
-  console.log('未找到目录页');
   return -1;
 }
 
-/**
- * 从目录页提取章节和页码信息
- * @param pdfDocument PDF文档对象
- * @param tocPageIndex 目录页索引
- * @returns 提取的目录项数组
- */
-export async function extractTocFromPage(pdfDocument: any, tocPageIndex: number): Promise<OutlineItem[]> {
-  console.log(`从第${tocPageIndex}页提取目录内容...`);
+async function extractOutlineFromPage(doc: PDFDocumentProxy, page: PDFPageProxy, maxPages: number): Promise<OutlineItem[]> {
+  console.log(`从 target page 页提取目录内容...`);
   
   const outline: OutlineItem[] = [];
-  const tocPage = await pdfDocument.getPage(tocPageIndex);
-  const textContent = await tocPage.getTextContent();
+  const textContent = await page.getTextContent();
   
   // 将文本内容转换为按垂直位置排序的行
-  const textItems = textContent.items;
-  const lines: {y: number, items: any[]}[] = [];
-  
+  const lines: Line[] = [];
+  const items = textContent.items.filter((item: any) => !!item.transform) as TextItem[];
+
   // 对文本项按照y坐标分组
-  textItems.forEach((item: any) => {
-    const y = Math.round(item.transform[5]); // y坐标
+  let shouldNotAppend = false;
+  items.forEach((item) => {
+    const y = item.transform[5]; // y坐标
     let line = lines.find(l => Math.abs(l.y - y) < 2); // 允许2个单位的误差
     
     if (!line) {
-      line = { y, items: [] };
+      shouldNotAppend = false;
+      line = { y, text: '' };
       lines.push(line);
     }
-    
-    line.items.push(item);
+    line.text += item.str;
   });
-  
-  // 按y坐标从大到小排序（PDF坐标系从下到上）
-  lines.sort((a, b) => b.y - a.y);
-  
-  // 处理每一行，提取章节标题和页码
-  for (let i = 0; i < lines.length; i++) {
-    const lineItems = lines[i].items;
-    lineItems.sort((a: any, b: any) => a.transform[4] - b.transform[4]); // 按x坐标排序
-    
-    const lineText = lineItems.map((item: any) => item.str).join('').trim();
-    
-    // 使用正则表达式匹配章节标题和页码
-    // 匹配模式：任何文本，后跟点线(可选)，然后是页码
-    const match = lineText.match(/^(.+?)(?:\.{2,}|\s{3,}|\t+)(\d+)$/);
-    // 或者匹配 "第X章 标题 123" 的格式
-    const chapterMatch = lineText.match(/^(第\s*\d+\s*[章节篇]\s*.+?)(\d+)$/);
-    // 或者匹配 "1. 标题 123" 的格式
-    const numberedMatch = lineText.match(/^(\d+\.\s*.+?)(\d+)$/);
-    
-    // 如果找到匹配
-    if (match || chapterMatch || numberedMatch) {
-      const m = match || chapterMatch || numberedMatch;
-      if (m && m.length >= 3) {  // 确保m不为null且有足够的分组
-        const title = m[1].trim();
-        const pageNumber = parseInt(m[2], 10);
-        
-        // 忽略无效页码（如果页码大于文档总页数的两倍，可能是错误匹配）
-        if (pageNumber <= pdfDocument.numPages * 2) {
-          outline.push({
-            title,
-            pageNumber,
-            level: 1
-          });
-        }
+
+  lines.sort((a, b) => a.y - b.y).forEach(l => {
+    const arr = l.text.split('..');
+    l.text = arr.length > 1 ? arr[0].trim() : '';
+  });
+
+  const annotations = await page.getAnnotations();
+  annotations.sort((a, b) => a.rect[1] - b.rect[1]);
+
+  // 上次查找的行
+  let lastLineIdx = -1;
+  for (let i = 0; i < annotations.length; i++) {
+    const annotation = annotations[i];
+    if (annotation.subtype === 'Link' && annotation.dest) {
+      const pageNumber = await matchPageIndex(doc, annotation.dest);
+      if (pageNumber === -1) {
+        console.warn(`跳过目录项 "${annotation.title}"，无效的目标引用`);
+        continue;
       }
+      // 从 lines 中找到与注释 y 坐标最接近的行
+      lastLineIdx = matchLine(lines, annotation.rect, lastLineIdx + 1);
+      const title = lastLineIdx === -1 ? `${i}` : lines[lastLineIdx].text;
+      // level 假设顶级章节 
+      outline.push({ title, page: pageNumber, level: 1 });
     }
   }
-  
+
   // 按页码排序并移除重复项
-  return outline
-    .sort((a, b) => a.pageNumber - b.pageNumber)
-    .filter((item, index, self) => 
-      index === 0 || item.pageNumber !== self[index - 1].pageNumber);
+  return outline;
+} 
+
+/**
+ * 查找目录页
+ * 通过扫描PDF的前几页内容，寻找含有"目录"、"Contents"等关键词的页面
+ * @param doc PDF文档对象
+ * @param maxScanPages 最大扫描页数
+ * @returns 目录页索引，如未找到则返回-1
+ */
+export async function findTableOfContentsPage(doc: PDFDocumentProxy, maxScanPages: number): Promise<OutlineItem[]> {
+  const page = await matchPageByText(doc, maxScanPages);
+  if (!page) return [];
+  return await extractOutlineFromPage(doc, page, doc.numPages);
 }
 
 /**
@@ -202,10 +194,10 @@ export async function extractPdfOutline(pdfPath: string, options: PdfProcessOpti
       nativeImageDecoderSupport: 'none'
     });
     
-    const pdfDocument = await loadingTask.promise;
+    const doc = await loadingTask.promise;
     
     // 1. 尝试从书签提取目录
-    const bookmarkOutline = await extractOutlineFromBookmarks(pdfDocument);
+    const bookmarkOutline = await extractOutlineFromBookmarks(doc);
     
     if (bookmarkOutline.length > 0) {
       console.log(`成功从PDF书签提取到${bookmarkOutline.length}个目录项`);
@@ -216,18 +208,13 @@ export async function extractPdfOutline(pdfPath: string, options: PdfProcessOpti
     }
     
     // 2. 如果没有书签，尝试从目录页提取
-    const tocPageIndex = await findTableOfContentsPage(pdfDocument, options.maxTocScanPages);
-    
-    if (tocPageIndex > 0) {
-      const tocOutline = await extractTocFromPage(pdfDocument, tocPageIndex);
-      
-      if (tocOutline.length > 0) {
-        console.log(`成功从目录页提取到${tocOutline.length}个目录项`);
-        return {
-          items: tocOutline,
-          source: OutlineSource.TOC_PAGE
-        };
-      }
+    const tocOutline = await findTableOfContentsPage(doc, options.maxTocScanPages);
+    if (tocOutline.length > 0) {
+      console.log(`成功从目录页提取到${tocOutline.length}个目录项`);
+      return {
+        items: tocOutline,
+        source: OutlineSource.TOC_PAGE
+      };
     }
     
     // 3. 都没有找到

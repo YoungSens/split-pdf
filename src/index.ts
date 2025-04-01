@@ -1,10 +1,8 @@
 import * as path from 'path';
 import * as fs from 'fs-extra';
-import pdfjsLib from './pdfjs-config';
-import { PDFDocument } from 'pdf-lib';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { OutlineItem, PdfProcessOptions, CliArgs } from './types';
+import { PdfProcessOptions, CliArgs } from './types';
 import { extractPdfOutline } from './outline-extractor';
 import { splitPdf } from './pdf-splitter';
 
@@ -50,8 +48,6 @@ const argv = yargs(hideBin(process.argv))
  * @param outputDir 输出目录根路径
  */
 async function processPdfFile(inputFile: string, outputDir: string): Promise<void> {
-  // DEBUG: 调试单个文件处理
-  debugger; // 调试点：处理单个PDF文件
   try {
     const filename = path.basename(inputFile);
     const filenameWithoutExt = path.basename(inputFile, '.pdf');
@@ -71,15 +67,15 @@ async function processPdfFile(inputFile: string, outputDir: string): Promise<voi
     
     // 提取目录结构
     const outlineResult = await extractPdfOutline(inputFile, options);
-    
-    if (outlineResult.items.length > 0) {
-      console.log(`文件 ${filename} 的目录结构 (来源: ${outlineResult.source}):`);
-      outlineResult.items.forEach(item => {
-        console.log(`- ${item.title} (页码: ${item.pageNumber})`);
-      });
-    } else {
-      console.log(`文件 ${filename} 没有提取到目录结构`);
-    }
+
+    // TBD: 不一定要过滤，先过滤了吧
+    const items = outlineResult.items.sort((a, b) => a.page - b.page).filter((item, index, self) => 
+      index === 0 || item.page !== self[index - 1].page
+    );
+
+    items.forEach(item => {
+      console.log(`- ${item.title} (页码: ${item.page})`);
+    });
     
     // 拆分PDF
     await splitPdf(inputFile, outlineResult, options, fileOutputDir, filenameWithoutExt);
@@ -113,9 +109,6 @@ async function scanPdfFiles(dir: string): Promise<string[]> {
  * 主函数
  */
 async function main(): Promise<void> {
-  // DEBUG: 在此处设置断点或使用debugger语句
-  debugger;
-
   const inputDir = argv['input-dir'];
   const outputDir = argv['output-dir'];
   

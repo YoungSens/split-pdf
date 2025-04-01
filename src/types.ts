@@ -5,7 +5,7 @@
 // 目录项类型
 export interface OutlineItem {
   title: string;
-  pageNumber: number;
+  page: number;
   level: number;
 }
 
